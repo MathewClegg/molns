@@ -9,6 +9,7 @@ import subprocess
 from MolnsLib.ssh_deploy import SSHDeploy
 import multiprocessing
 import json
+import time
 
 import logging
 logger = logging.getLogger()
@@ -466,7 +467,67 @@ class MOLNSController(MOLNSbase):
         else:
             print "No instance running for this controller"
 
+    @classmethod
+    def restart_controller(cls, args,config, password=None):
+        #Ver3
+        """ Restarts a controller node of a MOLNs controller """
+        logging.debug("MOLNSController.restart_controller(args={0})".format(args))
+        controller_obj = cls._get_controllerobj(args, config)
+        instance_list = config.get_all_instances(controller_id=controller_obj.id)
+        #Gets nodes
+        if len(instance_list) > 0:
+            #Traverses nodes
+            for i in instance_list:
+                #only works for controller without node :)
+                if i.worker_group_id is None:
+                    status = controller_obj.get_instance_status(i)
+                    #Stop if running
+                    print "<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<"
+                    ip = i.ip_address
+                    print ip
+                    if status == controller_obj.STATUS_RUNNING:
+                        print "Stopping controller running at {0}".format(i.ip_address)
+                        controller_obj.stop_instance(i) 
+                        #controller_obj.restart_instance(i)
+                        print "HELLO?!??!?!"
+                        time.sleep(10)
+                        inst = i	
+                    else:
+                        print "No Running worker"       
+        else:
+            print "No instance running for this controller"
+        """ Start the MOLNs controller. """
+        logging.debug("MOLNSController.start_controller(args={0})".format(args))
+        controller_obj = cls._get_controllerobj(args, config)
+        if controller_obj is None: return
+        # Check if any instances are assigned to this controller
+        instance_list = config.get_all_instances(controller_id=controller_obj.id)
+        # Check if they are running or stopped (if so, resume them)
+        inst = None
+        if len(instance_list) > 0:
+            for i in instance_list:
+                status = controller_obj.get_instance_status(i)
+                if status == controller_obj.STATUS_RUNNING:
+                    print "controller already running at {0}".format(i.ip_address)
+                    return
+                elif status == controller_obj.STATUS_STOPPED:
+                    print "Resuming instance at {0}".format(i.ip_address)
+                    controller_obj.resume_instance(i)
+                    inst = i
+                    break
+        if inst is None:
+            # Start a new instance
+            print "Starting new controller"
+            inst = controller_obj.start_instance()
+        # deploying
+        sshdeploy = SSHDeploy(config=controller_obj.provider, config_dir=config.config_dir)
+        sshdeploy.deploy_ipython_controller(inst.ip_address, notebook_password=password)
+        sshdeploy.deploy_molns_webserver(inst.ip_address)
+        #sshdeploy.deploy_stochss(inst.ip_address, port=443)
 
+
+
+             
     @classmethod
     def terminate_controller(cls, args, config):
         """ Terminate the head node of a MOLNs controller. """
@@ -1387,6 +1448,8 @@ COMMAND_LIST = [
             function=MOLNSController.status_controller),
         Command('start', {'name':None},
             function=MOLNSController.start_controller),
+        Command('restart', {'name':None},
+            function=MOLNSController.restart_controller),
         Command('stop', {'name':None},
             function=MOLNSController.stop_controller),
         Command('terminate', {'name':None},
@@ -1454,6 +1517,8 @@ COMMAND_LIST = [
             Command('import',{'filename.json':None},
                 function=MOLNSProvider.provider_import),
         ]),
+    
+                
         # Commands to interact with the instance DB
         SubCommand('instancedb',[
             Command('list', {},
@@ -1513,3 +1578,4 @@ def parseArgs():
 
 if __name__ == "__main__":
     parseArgs()
+

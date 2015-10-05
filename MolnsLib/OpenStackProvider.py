@@ -146,6 +146,7 @@ class OpenStackProvider(OpenStackBase):
             logging.debug("got novaclient.exceptions.NotFound: {0}".format(e))
             return False
 
+
     def create_molns_image(self):
         """ Create the molns image is created. """
         # start vm
@@ -237,6 +238,8 @@ class OpenStackProvider(OpenStackBase):
                 logging.debug("terminating instance {0}".format(instance))
                 instance.delete()
                 raise ProviderException("Failed to boot vm\n{0}".format(e))
+                
+
 
     def _terminate_instances(self, instance_ids):
         self._connect()
@@ -361,6 +364,31 @@ class OpenStackProvider(OpenStackBase):
         except Exception as e:
             raise ProviderException("Failed to attach a floating IP to the controller.\n{0}".format(e))
 
+
+    def _get_floating_ip(self, instace):
+        try:
+            floating_ips = self.nova.floating_ips.list()
+            for floating_ip in floating_ips:
+                print floating_ip
+                if floating_ip.fixed_ip is None:
+                    instace.add_floating_ip(floating_ip)
+                    return floating_ip.ip
+        except Exception as e:
+            raise ProviderException("ERROR::::::".format(e))
+
+    def _is_floatip_empty(self,instance):
+        try:
+            floating_ips = self.nova.floating_ips.list()
+            if floating_ips == []:
+                return True
+            else:
+                return False
+        except Exception as e:
+            raise ProviderException("ERROR::::::".format(e))
+
+
+
+
 ##########################################
 class OpenStackController(OpenStackBase):
     """ Provider handle for an open stack controller. """
@@ -380,14 +408,25 @@ class OpenStackController(OpenStackBase):
         if isinstance(nova_instance, list):
             ret = []
             for i in nova_instance:
-                ip = self.provider._attach_floating_ip(i)
+                if self.provider._is_floatip_empty(i):
+                    ip = self.provider._attach_floating_ip(i)
+                else:                   
+                    ip = self.provider._get_floating_ip(i) 
                 i  = self.datastore.get_instance(provider_instance_identifier=i.id, ip_address=ip, provider_id=self.provider.id, controller_id=self.id)
                 ret.append(i)
             return ret
         else:
-            ip = self.provider._attach_floating_ip(nova_instance)
+            #ip = self.provider._attach_floating_ip(nova_instance)            
+            if self.provider._is_floatip_empty(nova_instance):
+                ip = self.provider._attach_floating_ip(nova_instance)
+            else:                   
+                ip = self.provider._get_floating_ip(nova_instance) 
+                
             i  = self.datastore.get_instance(provider_instance_identifier=nova_instance.id, ip_address=ip, provider_id=self.provider.id, controller_id=self.id)
             return i
+
+
+        
 
     def resume_instance(self, instances):
         if isinstance(instances, list):
@@ -395,6 +434,7 @@ class OpenStackController(OpenStackBase):
             self.provider._resume_instances(pids)
         else:
             self.provider._resume_instances([instances.provider_instance_identifier])
+            
 
     def stop_instance(self, instances):
         if isinstance(instances, list):
@@ -402,6 +442,7 @@ class OpenStackController(OpenStackBase):
             self.provider._stop_instances(pids)
         else:
             self.provider._stop_instances([instances.provider_instance_identifier])
+
 
     def terminate_instance(self, instances):
         if isinstance(instances, list):
@@ -416,6 +457,13 @@ class OpenStackController(OpenStackBase):
             self.provider._delete_floating_ip(instances.ip_address)
             self.datastore.delete_instance(instances)
     
+    def _get_ip(self, instance_ids):
+        self._connect()
+        for instance_id in instance_ids:
+            instance = self.nova.servers.get(instance_id)
+            return instance.floating_ip
+
+
     def get_instance_status(self, instance):
         try:
             status = self.provider._get_instance_status(instance.provider_instance_identifier)
@@ -452,7 +500,10 @@ class OpenStackWorkerGroup(OpenStackController):
             ret = []
             for i in nova_instance:
                 try:
-                    ip = self.provider._attach_floating_ip(i)
+                    if self.provider._is_floatip_empty(i):
+                        ip = self.provider._attach_floating_ip(i)
+                    else:                   
+                        ip = self.provider._get_floating_ip(i) 
                 except Exception as e:
                     logging.exception(e)
                     logging.debug("Terminating instance {0}".format(i.id))
@@ -462,7 +513,10 @@ class OpenStackWorkerGroup(OpenStackController):
             return ret
         else:
             try:
-                ip = self.provider._attach_floating_ip(nova_instance)
+                if self.provider._is_floatip_empty(nova_instance):
+                    ip = self.provider._attach_floating_ip(nova_instance)
+                else:                   
+                    ip = self.provider._get_floating_ip(nova_instance) 
             except Exception as e:
                 logging.exception(e)
                 logging.debug("Terminating instance {0}".format(nova_instance.id))
@@ -471,6 +525,8 @@ class OpenStackWorkerGroup(OpenStackController):
 
             i  = self.datastore.get_instance(provider_instance_identifier=nova_instance.id, ip_address=ip, provider_id=self.provider.id, controller_id=self.controller.id, worker_group_id=self.id)
             return i
+      
+        
 
     def terminate_instance(self, instances):
         if isinstance(instances, list):
